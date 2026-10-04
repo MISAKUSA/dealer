@@ -190,7 +190,7 @@ async def create_deal(
     interaction: discord.Interaction,
     target_user: discord.Member,
     deal_type: app_commands.Choice[str],
-    amount_usd: app_commands.Range[float, 0.01, 1000000],
+    amount_usd: app_commands.Range[float, 0.01, 1000000.0],
     description: str,
 ) -> None:
     if interaction.guild is None or not isinstance(interaction.user, discord.Member):
