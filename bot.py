@@ -64,6 +64,23 @@ async def send_staff_log(guild: discord.Guild, row: sqlite3.Row, note: str | Non
         pass
 
 
+async def notify_spender_cancelled(row: sqlite3.Row, reason: str) -> bool:
+    spender = bot.get_user(row["spender_id"])
+    if spender is None:
+        try:
+            spender = await bot.fetch_user(row["spender_id"])
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return False
+    try:
+        await spender.send(
+            f"Deal #{row['deal_id']} was cancelled. {reason}",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+    return True
+
+
 class DealApprovalView(discord.ui.View):
     def __init__(self, deal_id: int):
         super().__init__(timeout=None)
@@ -87,8 +104,14 @@ class DealApprovalView(discord.ui.View):
             child.disabled = True
         await interaction.response.edit_message(embed=deal_embed(discord.Embed(color=discord.Color.dark_teal()), updated), view=self)
         guild = bot.get_guild(updated["guild_id"])
+        notification_sent = False
+        if new_status == "Cancelled":
+            notification_sent = await notify_spender_cancelled(updated, "The host declined the request.")
         if guild:
-            await send_staff_log(guild, updated)
+            note = None
+            if new_status == "Cancelled":
+                note = "Host declined. " + ("Spender notified." if notification_sent else "Spender DM could not be delivered.")
+            await send_staff_log(guild, updated, note)
         await interaction.followup.send(f"Deal #{self.deal_id} marked {new_status.lower()}.", ephemeral=True)
 
     @discord.ui.button(label="Accept Deal", style=discord.ButtonStyle.success)
@@ -258,7 +281,7 @@ async def update_published_leaderboard(guild: discord.Guild) -> None:
             return
     if not isinstance(channel, discord.TextChannel):
         return
-    embed = await make_leaderboard(guild, "all_time", "buyer", None, False)
+    embed = await make_channel_leaderboard(guild)
     try:
         message = await channel.fetch_message(config["message_id"])
     except discord.NotFound:
@@ -276,6 +299,36 @@ async def update_published_leaderboard(guild: discord.Guild) -> None:
         await message.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
     except (discord.Forbidden, discord.HTTPException):
         pass
+
+
+async def make_channel_leaderboard(guild: discord.Guild) -> discord.Embed:
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    buyers = store.leaderboard(guild.id, "all_time", month, "buyer", None)
+    sellers = store.leaderboard(guild.id, "all_time", month, "creator", None, False)
+    embed = discord.Embed(
+        title="Deal Leaderboard | All-Time",
+        color=discord.Color.purple(),
+    )
+    buyer_lines = [
+        f"**{rank}. <@{row['user_id']}>** - {money(row['amount_cents'])} spent | {row['deal_count']} deals"
+        for rank, row in enumerate(buyers, start=1)
+    ]
+    seller_lines = [
+        f"**{rank}. <@{row['user_id']}>** - {row['deal_count']} completed deals"
+        for rank, row in enumerate(sellers, start=1)
+    ]
+    embed.add_field(
+        name="Top Buyers",
+        value="\n".join(buyer_lines) if buyer_lines else "No completed deals yet.",
+        inline=False,
+    )
+    embed.add_field(
+        name="Top Sellers",
+        value="\n".join(seller_lines) if seller_lines else "No completed deals yet.",
+        inline=False,
+    )
+    embed.set_footer(text="Seller earnings are private to staff.")
+    return embed
 
 
 @deal_group.command(name="create", description="Send a private deal request to a host")
@@ -375,9 +428,15 @@ async def cancel_deal(interaction: discord.Interaction, deal_id: app_commands.Ra
     if not store.update_status(deal_id, row["status"], "Cancelled"):
         await interaction.response.send_message("This deal changed before it could be cancelled; try again.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True)
     updated = store.get_deal(deal_id)
-    await send_staff_log(interaction.guild, updated, f"Force-cancelled by staff user {interaction.user.id}.")
-    await interaction.response.send_message(f"Deal #{deal_id} was force-cancelled.", ephemeral=True)
+    notification_sent = await notify_spender_cancelled(updated, "A staff member cancelled the deal.")
+    note = f"Force-cancelled by staff user {interaction.user.id}. "
+    note += "Spender notified." if notification_sent else "Spender DM could not be delivered."
+    await send_staff_log(interaction.guild, updated, note)
+    result = f"Deal #{deal_id} was force-cancelled."
+    result += " The spender was notified." if notification_sent else " The spender's DM could not be delivered."
+    await interaction.followup.send(result, ephemeral=True)
 
 
 @admin_group.command(name="set-roles", description="Configure roles allowed to buy, create, and administer deals")
@@ -431,7 +490,7 @@ async def set_leaderboard_channel(
         )
         return
     await interaction.response.defer(ephemeral=True)
-    embed = await make_leaderboard(interaction.guild, "all_time", "buyer", None, False)
+    embed = await make_channel_leaderboard(interaction.guild)
     try:
         message = await channel.send(
             embed=embed, allowed_mentions=discord.AllowedMentions.none()
@@ -450,7 +509,7 @@ async def set_leaderboard_channel(
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
     await interaction.followup.send(
-        f"The auto-updating all-time buyer leaderboard is now posted in {channel.mention}.",
+        f"The auto-updating all-time buyer and seller leaderboard is now posted in {channel.mention}.",
         ephemeral=True,
     )
 

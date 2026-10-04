@@ -17,7 +17,7 @@ A Python `discord.py` bot for private deal requests, staff review, deal completi
 - `/deal complete deal_id` completes an accepted deal. The spender, host, or staff may complete it.
 - `/deal cancel deal_id` force-cancels a pending or accepted deal. Staff only.
 - `/admin reset-leaderboard` resets this server's monthly and all-time totals after confirmation. Deal records are preserved; only deals created after the reset count.
-- `/admin set-leaderboard-channel channel` posts an auto-updating public all-time buyer board in the selected text channel. Entries mention users without notifying them.
+- `/admin set-leaderboard-channel channel` posts an auto-updating public all-time buyer and seller board in the selected text channel. Entries mention users without notifying them; seller earnings remain staff-only.
 - `/leaderboard` displays monthly/all-time buyer or creator rankings, with an optional deal-type filter. The **My Rank** button privately shows your rank for the selected view.
 
 ## Run locally
