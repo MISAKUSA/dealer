@@ -183,14 +183,14 @@ class LeaderboardView(discord.ui.View):
         self.monthly.style = discord.ButtonStyle.primary
         await self.refresh(interaction)
 
-    @discord.ui.button(label="Top Buyers", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Top Spenders", style=discord.ButtonStyle.primary, row=0)
     async def buyers(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.role_type = "buyer"
         self.buyers.style = discord.ButtonStyle.primary
         self.creators.style = discord.ButtonStyle.secondary
         await self.refresh(interaction)
 
-    @discord.ui.button(label="Top Creators", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Top Hosts", style=discord.ButtonStyle.secondary, row=0)
     async def creators(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.role_type = "creator"
         self.buyers.style = discord.ButtonStyle.secondary
@@ -246,7 +246,7 @@ async def make_leaderboard(
 ) -> discord.Embed:
     month = datetime.now(timezone.utc).strftime("%Y-%m")
     rows = store.leaderboard(guild.id, period, month, role_type, deal_type, staff_view)
-    title_role = "Top Buyers" if role_type == "buyer" else "Top Creators"
+    title_role = "Top Spenders" if role_type == "buyer" else "Top Hosts"
     period_label = "All-Time" if period == "all_time" else f"Monthly ({month})"
     embed = discord.Embed(title=f"{title_role} | {period_label}", color=discord.Color.purple())
     embed.description = f"Deal type: {deal_type or 'All'}"
@@ -265,7 +265,7 @@ async def make_leaderboard(
         lines.append(f"**{rank}. {user_mention}** - {value}")
     embed.description += "\n\n" + "\n".join(lines)
     if role_type == "creator" and not staff_view:
-        embed.set_footer(text="Creator earnings are visible only to staff.")
+        embed.set_footer(text="Host earnings are visible only to staff.")
     return embed
 
 
@@ -303,36 +303,36 @@ async def update_published_leaderboard(guild: discord.Guild) -> None:
 
 async def make_channel_leaderboard(guild: discord.Guild) -> discord.Embed:
     month = datetime.now(timezone.utc).strftime("%Y-%m")
-    buyers = store.leaderboard(guild.id, "all_time", month, "buyer", None)
-    sellers = store.leaderboard(guild.id, "all_time", month, "creator", None, False)
+    spenders = store.leaderboard(guild.id, "all_time", month, "buyer", None)
+    hosts = store.leaderboard(guild.id, "all_time", month, "creator", None, False)
     embed = discord.Embed(
         title="Deal Leaderboard | All-Time",
         color=discord.Color.purple(),
     )
-    buyer_lines = [
+    spender_lines = [
         f"**{rank}. <@{row['user_id']}>** - {money(row['amount_cents'])} spent | {row['deal_count']} deals"
-        for rank, row in enumerate(buyers, start=1)
+        for rank, row in enumerate(spenders, start=1)
     ]
-    seller_lines = [
+    host_lines = [
         f"**{rank}. <@{row['user_id']}>** - {row['deal_count']} completed deals"
-        for rank, row in enumerate(sellers, start=1)
+        for rank, row in enumerate(hosts, start=1)
     ]
     embed.add_field(
-        name="Top Buyers",
-        value="\n".join(buyer_lines) if buyer_lines else "No completed deals yet.",
+        name="Top Spenders",
+        value="\n".join(spender_lines) if spender_lines else "No completed deals yet.",
         inline=False,
     )
     embed.add_field(
-        name="Top Sellers",
-        value="\n".join(seller_lines) if seller_lines else "No completed deals yet.",
+        name="Top Hosts",
+        value="\n".join(host_lines) if host_lines else "No completed deals yet.",
         inline=False,
     )
-    embed.set_footer(text="Seller earnings are private to staff.")
+    embed.set_footer(text="Host earnings are private to staff.")
     return embed
 
 
 @deal_group.command(name="create", description="Send a private deal request to a host")
-@app_commands.describe(target_user="The creator/host", deal_type="Premade, Custom, or Session", amount_usd="USD amount", description="Short deal description")
+@app_commands.describe(target_user="The host", deal_type="Premade, Custom, or Session", amount_usd="USD amount", description="Short deal description")
 @app_commands.choices(deal_type=[app_commands.Choice(name=value, value=value) for value in DEAL_TYPES])
 async def create_deal(
     interaction: discord.Interaction,
@@ -346,13 +346,13 @@ async def create_deal(
         return
     roles = store.get_roles(interaction.guild.id)
     if not roles:
-        await interaction.response.send_message("An administrator must configure buyer, creator, and staff roles first.", ephemeral=True)
+        await interaction.response.send_message("An administrator must configure spender, host, and staff roles first.", ephemeral=True)
         return
     if not has_role(interaction.user, roles["buyer_role_id"]):
-        await interaction.response.send_message("You need the configured buyer role to create a deal.", ephemeral=True)
+        await interaction.response.send_message("You need the configured spender role to create a deal.", ephemeral=True)
         return
     if not has_role(target_user, roles["creator_role_id"]):
-        await interaction.response.send_message("The selected host does not have the configured creator role.", ephemeral=True)
+        await interaction.response.send_message("The selected host does not have the configured host role.", ephemeral=True)
         return
     if target_user.id == interaction.user.id or target_user.bot:
         await interaction.response.send_message("Choose another server member as the host.", ephemeral=True)
@@ -443,16 +443,16 @@ async def cancel_deal(interaction: discord.Interaction, deal_id: app_commands.Ra
 @app_commands.default_permissions(administrator=True)
 async def set_roles(
     interaction: discord.Interaction,
-    buyer_role: discord.Role,
-    creator_role: discord.Role,
+    spender_role: discord.Role,
+    host_role: discord.Role,
     staff_role: discord.Role,
 ) -> None:
     if interaction.guild is None or not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("Only a server administrator can configure these roles.", ephemeral=True)
         return
-    store.set_roles(interaction.guild.id, buyer_role.id, creator_role.id, staff_role.id)
+    store.set_roles(interaction.guild.id, spender_role.id, host_role.id, staff_role.id)
     await interaction.response.send_message(
-        f"Roles saved: buyer {buyer_role.mention}, creator {creator_role.mention}, staff {staff_role.mention}.",
+        f"Roles saved: spender {spender_role.mention}, host {host_role.mention}, staff {staff_role.mention}.",
         ephemeral=True,
     )
 
@@ -472,7 +472,7 @@ async def reset_leaderboard(interaction: discord.Interaction) -> None:
     )
 
 
-@admin_group.command(name="set-leaderboard-channel", description="Choose the public channel for the auto-updating buyer leaderboard")
+@admin_group.command(name="set-leaderboard-channel", description="Choose the public channel for the auto-updating deal leaderboard")
 async def set_leaderboard_channel(
     interaction: discord.Interaction,
     channel: discord.TextChannel,
@@ -509,7 +509,7 @@ async def set_leaderboard_channel(
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
     await interaction.followup.send(
-        f"The auto-updating all-time buyer and seller leaderboard is now posted in {channel.mention}.",
+        f"The auto-updating all-time spender and host leaderboard is now posted in {channel.mention}.",
         ephemeral=True,
     )
 

@@ -1,24 +1,24 @@
 # Deal Tracker Bot
 
-A Python `discord.py` bot for private deal requests, staff review, deal completion, and buyer/creator leaderboards. It is configured for Railway and uses SQLite.
+A Python `discord.py` bot for private deal requests, staff review, deal completion, and spender/host leaderboards. It is configured for Railway and uses SQLite.
 
 ## Privacy model
 
 - `/deal create` responds ephemerally to the spender. Discord does not allow an ephemeral response to be visible to the tagged host or staff.
 - The host receives the request by DM with Accept and Decline buttons. Only the spender and host receive the deal details in DMs.
-- Deal details and creator earnings are logged in the configured staff channel. Keep that channel restricted to staff.
-- Public leaderboards show buyer spending and creator completed-deal counts. Creator earnings are only shown to members with the configured staff role (or server administrators).
+- Deal details and host earnings are logged in the configured staff channel. Keep that channel restricted to staff.
+- Public leaderboards show total USD spent by spenders and completed-deal counts for hosts. Host earnings are only shown to members with the configured staff role (or server administrators).
 - `/deal complete` is only available to a deal participant or staff, and only after the host accepts.
 
 ## Commands
 
-- `/admin set-roles buyer_role creator_role staff_role` configures the roles for the current server. A server administrator must run it.
+- `/admin set-roles spender_role host_role staff_role` configures the roles for the current server. A server administrator must run it.
 - `/deal create target_user type amount_usd description` creates a deal. The spender and host must have their configured roles.
 - `/deal complete deal_id` completes an accepted deal. The spender, host, or staff may complete it.
 - `/deal cancel deal_id` force-cancels a pending or accepted deal. Staff only.
 - `/admin reset-leaderboard` resets this server's monthly and all-time totals after confirmation. Deal records are preserved; only deals created after the reset count.
-- `/admin set-leaderboard-channel channel` posts an auto-updating public all-time buyer and seller board in the selected text channel. Entries mention users without notifying them; seller earnings remain staff-only.
-- `/leaderboard` displays monthly/all-time buyer or creator rankings, with an optional deal-type filter. The **My Rank** button privately shows your rank for the selected view.
+- `/admin set-leaderboard-channel channel` posts an auto-updating public all-time spender and host board in the selected text channel. Entries mention users without notifying them; host earnings remain staff-only.
+- `/leaderboard` displays monthly/all-time spender or host rankings, with an optional deal-type filter. The **My Rank** button privately shows your rank for the selected view.
 
 ## Run locally
 
