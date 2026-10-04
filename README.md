@@ -16,6 +16,7 @@ A Python `discord.py` bot for private deal requests, staff review, deal completi
 - `/deal create target_user type amount_usd description` creates a deal. The spender and host must have their configured roles.
 - `/deal complete deal_id` completes an accepted deal. The spender, host, or staff may complete it.
 - `/deal cancel deal_id` force-cancels a pending or accepted deal. Staff only.
+- `/admin reset-leaderboard` resets this server's monthly and all-time totals after confirmation. Deal records are preserved; only deals created after the reset count.
 - `/leaderboard` displays monthly/all-time buyer or creator rankings, with an optional deal-type filter. The **My Rank** button privately shows your rank for the selected view.
 
 ## Run locally

@@ -29,6 +29,10 @@ class Store:
                     creator_role_id INTEGER NOT NULL,
                     staff_role_id INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS leaderboard_resets (
+                    guild_id INTEGER PRIMARY KEY,
+                    last_deal_id INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS deals (
                     deal_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER NOT NULL,
@@ -136,18 +140,39 @@ class Store:
             )
             return cursor.rowcount == 1
 
+    def reset_leaderboard(self, guild_id: int) -> None:
+        with self.connect() as connection:
+            last_deal_id = connection.execute(
+                "SELECT COALESCE(MAX(deal_id), 0) FROM deals WHERE guild_id = ?",
+                (guild_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """INSERT INTO leaderboard_resets (guild_id, last_deal_id)
+                   VALUES (?, ?)
+                   ON CONFLICT(guild_id) DO UPDATE SET last_deal_id=excluded.last_deal_id""",
+                (guild_id, last_deal_id),
+            )
+
     def leaderboard(
-        self, period: str, month: str, role_type: str, deal_type: str | None,
+        self, guild_id: int, period: str, month: str, role_type: str, deal_type: str | None,
         rank_by_amount: bool = True,
         limit: int | None = 10,
     ) -> list[sqlite3.Row]:
-        filters = ["period = ?", "role_type = ?"]
-        parameters: list[object] = [period, role_type]
+        if role_type not in ("buyer", "creator"):
+            raise ValueError("role_type must be 'buyer' or 'creator'")
+        user_column = "d.spender_id" if role_type == "buyer" else "d.host_id"
+        filters = [
+            "d.guild_id = ?",
+            "d.status = 'Completed'",
+            "d.completed_at IS NOT NULL",
+            "d.deal_id > COALESCE((SELECT last_deal_id FROM leaderboard_resets WHERE guild_id = d.guild_id), 0)",
+        ]
+        parameters: list[object] = [guild_id]
         if period == "monthly":
-            filters.append("month = ?")
+            filters.append("strftime('%Y-%m', d.completed_at) = ?")
             parameters.append(month)
         if deal_type:
-            filters.append("type = ?")
+            filters.append("d.type = ?")
             parameters.append(deal_type)
         order_by = (
             "amount_cents DESC, deal_count DESC"
@@ -159,9 +184,9 @@ class Store:
             parameters.append(limit)
         with self.connect() as connection:
             return list(connection.execute(
-                f"""SELECT user_id, SUM(deal_count) AS deal_count,
-                           SUM(amount_cents) AS amount_cents
-                    FROM leaderboards WHERE {' AND '.join(filters)}
-                    GROUP BY user_id ORDER BY {order_by}{limit_clause}""",
+                f"""SELECT {user_column} AS user_id, COUNT(*) AS deal_count,
+                           SUM(d.amount_cents) AS amount_cents
+                    FROM deals AS d WHERE {' AND '.join(filters)}
+                    GROUP BY {user_column} ORDER BY {order_by}{limit_clause}""",
                 parameters,
             ).fetchall())

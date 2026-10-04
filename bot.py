@@ -119,7 +119,7 @@ class LeaderboardView(discord.ui.View):
     async def my_rank(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         month = datetime.now(timezone.utc).strftime("%Y-%m")
         rows = store.leaderboard(
-            self.period, month, self.role_type, self.deal_type,
+            self.guild.id, self.period, month, self.role_type, self.deal_type,
             self.staff_view, limit=None,
         )
         user_rank = next(
@@ -184,12 +184,43 @@ class LeaderboardView(discord.ui.View):
         await self.refresh(interaction)
 
 
+class LeaderboardResetView(discord.ui.View):
+    def __init__(self, guild_id: int, requester_id: int):
+        super().__init__(timeout=60)
+        self.guild_id = guild_id
+        self.requester_id = requester_id
+
+    async def interaction_allowed(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requester_id:
+            await interaction.response.send_message(
+                "Only the staff member who started this reset can confirm it.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm Reset", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self.interaction_allowed(interaction):
+            return
+        store.reset_leaderboard(self.guild_id)
+        await interaction.response.edit_message(
+            content="Leaderboard reset. Deal history was preserved; only deals created from now on count toward rankings.",
+            view=None,
+        )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self.interaction_allowed(interaction):
+            return
+        await interaction.response.edit_message(content="Leaderboard reset cancelled.", view=None)
+
+
 async def make_leaderboard(
     guild: discord.Guild, period: str, role_type: str, deal_type: str | None,
     staff_view: bool,
 ) -> discord.Embed:
     month = datetime.now(timezone.utc).strftime("%Y-%m")
-    rows = store.leaderboard(period, month, role_type, deal_type, staff_view)
+    rows = store.leaderboard(guild.id, period, month, role_type, deal_type, staff_view)
     title_role = "Top Buyers" if role_type == "buyer" else "Top Creators"
     period_label = "All-Time" if period == "all_time" else f"Monthly ({month})"
     embed = discord.Embed(title=f"{title_role} | {period_label}", color=discord.Color.purple())
@@ -328,6 +359,21 @@ async def set_roles(
     store.set_roles(interaction.guild.id, buyer_role.id, creator_role.id, staff_role.id)
     await interaction.response.send_message(
         f"Roles saved: buyer {buyer_role.mention}, creator {creator_role.mention}, staff {staff_role.mention}.",
+        ephemeral=True,
+    )
+
+
+@admin_group.command(name="reset-leaderboard", description="Reset this server's leaderboard totals (staff only)")
+async def reset_leaderboard(interaction: discord.Interaction) -> None:
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        return
+    if not is_staff(interaction.user, interaction.guild.id):
+        await interaction.response.send_message("Only staff can reset the leaderboard.", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        "Reset monthly and all-time leaderboards for this server? Existing deals will remain in the database, but deals created before the reset will no longer count.",
+        view=LeaderboardResetView(interaction.guild.id, interaction.user.id),
         ephemeral=True,
     )
 
