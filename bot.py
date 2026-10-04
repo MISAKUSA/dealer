@@ -291,6 +291,29 @@ async def complete_deal(interaction: discord.Interaction, deal_id: app_commands.
     await interaction.response.send_message(f"Deal #{deal_id} completed. Leaderboards have been updated.", ephemeral=True)
 
 
+@deal_group.command(name="cancel", description="Force-cancel a pending or accepted deal (staff only)")
+async def cancel_deal(interaction: discord.Interaction, deal_id: app_commands.Range[int, 1, 2147483647]) -> None:
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message("This command must be used in the deal's server.", ephemeral=True)
+        return
+    if not is_staff(interaction.user, interaction.guild.id):
+        await interaction.response.send_message("Only staff can force-cancel deals.", ephemeral=True)
+        return
+    row = store.get_deal(deal_id)
+    if row is None or row["guild_id"] != interaction.guild.id:
+        await interaction.response.send_message("Deal not found in this server.", ephemeral=True)
+        return
+    if row["status"] not in ("Pending", "Accepted"):
+        await interaction.response.send_message("Only pending or accepted deals can be force-cancelled.", ephemeral=True)
+        return
+    if not store.update_status(deal_id, row["status"], "Cancelled"):
+        await interaction.response.send_message("This deal changed before it could be cancelled; try again.", ephemeral=True)
+        return
+    updated = store.get_deal(deal_id)
+    await send_staff_log(interaction.guild, updated, f"Force-cancelled by staff user {interaction.user.id}.")
+    await interaction.response.send_message(f"Deal #{deal_id} was force-cancelled.", ephemeral=True)
+
+
 @admin_group.command(name="set-roles", description="Configure roles allowed to buy, create, and administer deals")
 @app_commands.default_permissions(administrator=True)
 async def set_roles(

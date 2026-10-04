@@ -118,6 +118,14 @@ class Store:
             ).fetchall())
 
     def update_status(self, deal_id: int, old_status: str, new_status: str) -> bool:
+        allowed_transitions = {
+            ("Pending", "Accepted"),
+            ("Pending", "Cancelled"),
+            ("Accepted", "Completed"),
+            ("Accepted", "Cancelled"),
+        }
+        if (old_status, new_status) not in allowed_transitions:
+            return False
         with self.connect() as connection:
             cursor = connection.execute(
                 """UPDATE deals
