@@ -207,6 +207,8 @@ class LeaderboardResetView(discord.ui.View):
             content="Leaderboard reset. Deal history was preserved; only deals created from now on count toward rankings.",
             view=None,
         )
+        if interaction.guild:
+            await update_published_leaderboard(interaction.guild)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -230,19 +232,50 @@ async def make_leaderboard(
         return embed
     lines = []
     for rank, row in enumerate(rows, start=1):
-        user_id = row["user_id"]
-        user_link = f"[{user_id}](https://discord.com/users/{user_id})"
+        user_mention = f"<@{row['user_id']}>"
         if role_type == "buyer":
             value = f"{money(row['amount_cents'])} spent | {row['deal_count']} deals"
         elif staff_view:
             value = f"{money(row['amount_cents'])} earned | {row['deal_count']} deals"
         else:
             value = f"{row['deal_count']} completed deals"
-        lines.append(f"**{rank}. {user_link}** - {value}")
+        lines.append(f"**{rank}. {user_mention}** - {value}")
     embed.description += "\n\n" + "\n".join(lines)
     if role_type == "creator" and not staff_view:
         embed.set_footer(text="Creator earnings are visible only to staff.")
     return embed
+
+
+async def update_published_leaderboard(guild: discord.Guild) -> None:
+    config = store.get_leaderboard_channel(guild.id)
+    if config is None:
+        return
+    channel = guild.get_channel(config["channel_id"])
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(config["channel_id"])
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return
+    if not isinstance(channel, discord.TextChannel):
+        return
+    embed = await make_leaderboard(guild, "all_time", "buyer", None, False)
+    try:
+        message = await channel.fetch_message(config["message_id"])
+    except discord.NotFound:
+        try:
+            message = await channel.send(
+                embed=embed, allowed_mentions=discord.AllowedMentions.none()
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return
+        store.set_leaderboard_channel(guild.id, channel.id, message.id)
+        return
+    except (discord.Forbidden, discord.HTTPException):
+        return
+    try:
+        await message.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+    except (discord.Forbidden, discord.HTTPException):
+        pass
 
 
 @deal_group.command(name="create", description="Send a private deal request to a host")
@@ -317,9 +350,11 @@ async def complete_deal(interaction: discord.Interaction, deal_id: app_commands.
     if not store.update_status(deal_id, "Accepted", "Completed"):
         await interaction.response.send_message("This deal changed before it could be completed; try again.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True)
     updated = store.get_deal(deal_id)
     await send_staff_log(interaction.guild, updated)
-    await interaction.response.send_message(f"Deal #{deal_id} completed. Leaderboards have been updated.", ephemeral=True)
+    await update_published_leaderboard(interaction.guild)
+    await interaction.followup.send(f"Deal #{deal_id} completed. Leaderboards have been updated.", ephemeral=True)
 
 
 @deal_group.command(name="cancel", description="Force-cancel a pending or accepted deal (staff only)")
@@ -378,6 +413,48 @@ async def reset_leaderboard(interaction: discord.Interaction) -> None:
     )
 
 
+@admin_group.command(name="set-leaderboard-channel", description="Choose the public channel for the auto-updating buyer leaderboard")
+async def set_leaderboard_channel(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+) -> None:
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        return
+    if not is_staff(interaction.user, interaction.guild.id):
+        await interaction.response.send_message("Only staff can configure the leaderboard channel.", ephemeral=True)
+        return
+    permissions = channel.permissions_for(interaction.guild.me)
+    if not permissions.send_messages or not permissions.embed_links:
+        await interaction.response.send_message(
+            "I need Send Messages and Embed Links permissions in that channel.", ephemeral=True
+        )
+        return
+    await interaction.response.defer(ephemeral=True)
+    embed = await make_leaderboard(interaction.guild, "all_time", "buyer", None, False)
+    try:
+        message = await channel.send(
+            embed=embed, allowed_mentions=discord.AllowedMentions.none()
+        )
+    except (discord.Forbidden, discord.HTTPException):
+        await interaction.followup.send("I could not post the leaderboard in that channel.", ephemeral=True)
+        return
+    previous = store.get_leaderboard_channel(interaction.guild.id)
+    store.set_leaderboard_channel(interaction.guild.id, channel.id, message.id)
+    if previous:
+        old_channel = interaction.guild.get_channel(previous["channel_id"])
+        if isinstance(old_channel, discord.TextChannel):
+            try:
+                old_message = await old_channel.fetch_message(previous["message_id"])
+                await old_message.delete()
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+    await interaction.followup.send(
+        f"The auto-updating all-time buyer leaderboard is now posted in {channel.mention}.",
+        ephemeral=True,
+    )
+
+
 @bot.tree.command(name="leaderboard", description="View completed-deal leaderboards")
 async def leaderboard(interaction: discord.Interaction) -> None:
     if interaction.guild is None:
@@ -402,6 +479,8 @@ async def on_ready() -> None:
         await bot.tree.sync()
         for row in store.pending_deals():
             bot.add_view(DealApprovalView(row["deal_id"]))
+        for guild in bot.guilds:
+            await update_published_leaderboard(guild)
         bot.commands_synced = True
     print(f"Logged in as {bot.user}")
 

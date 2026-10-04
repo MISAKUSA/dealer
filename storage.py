@@ -33,6 +33,11 @@ class Store:
                     guild_id INTEGER PRIMARY KEY,
                     last_deal_id INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS leaderboard_channels (
+                    guild_id INTEGER PRIMARY KEY,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS deals (
                     deal_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER NOT NULL,
@@ -152,6 +157,21 @@ class Store:
                    ON CONFLICT(guild_id) DO UPDATE SET last_deal_id=excluded.last_deal_id""",
                 (guild_id, last_deal_id),
             )
+
+    def set_leaderboard_channel(self, guild_id: int, channel_id: int, message_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO leaderboard_channels VALUES (?, ?, ?)
+                   ON CONFLICT(guild_id) DO UPDATE SET
+                   channel_id=excluded.channel_id, message_id=excluded.message_id""",
+                (guild_id, channel_id, message_id),
+            )
+
+    def get_leaderboard_channel(self, guild_id: int) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return connection.execute(
+                "SELECT * FROM leaderboard_channels WHERE guild_id = ?", (guild_id,)
+            ).fetchone()
 
     def leaderboard(
         self, guild_id: int, period: str, month: str, role_type: str, deal_type: str | None,
