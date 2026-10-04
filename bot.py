@@ -115,6 +115,37 @@ class LeaderboardView(discord.ui.View):
         )
         await interaction.response.edit_message(embed=embed, view=self)
 
+    @discord.ui.button(label="My Rank", style=discord.ButtonStyle.secondary, row=2)
+    async def my_rank(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        rows = store.leaderboard(
+            self.period, month, self.role_type, self.deal_type,
+            self.staff_view, limit=None,
+        )
+        user_rank = next(
+            ((rank, row) for rank, row in enumerate(rows, start=1)
+             if row["user_id"] == interaction.user.id),
+            None,
+        )
+        if user_rank is None:
+            await interaction.response.send_message(
+                "You have no completed deals in this leaderboard yet.", ephemeral=True
+            )
+            return
+        rank, row = user_rank
+        if self.role_type == "buyer":
+            summary = f"{money(row['amount_cents'])} spent across {row['deal_count']} deals"
+        elif self.staff_view:
+            summary = f"{money(row['amount_cents'])} earned across {row['deal_count']} deals"
+        else:
+            summary = f"{row['deal_count']} completed deals"
+        period_label = "all-time" if self.period == "all_time" else f"this month ({month})"
+        type_label = self.deal_type or "all deal types"
+        await interaction.response.send_message(
+            f"Your rank is **#{rank}** for {period_label}, {type_label}: {summary}.",
+            ephemeral=True,
+        )
+
     @discord.ui.button(label="All-Time", style=discord.ButtonStyle.primary, row=0)
     async def all_time(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.period = "all_time"
@@ -161,22 +192,22 @@ async def make_leaderboard(
     rows = store.leaderboard(period, month, role_type, deal_type, staff_view)
     title_role = "Top Buyers" if role_type == "buyer" else "Top Creators"
     period_label = "All-Time" if period == "all_time" else f"Monthly ({month})"
-    embed = discord.Embed(title=f"{title_role} | {period_label}", color=discord.Color.teal())
+    embed = discord.Embed(title=f"{title_role} | {period_label}", color=discord.Color.purple())
     embed.description = f"Deal type: {deal_type or 'All'}"
     if not rows:
         embed.add_field(name="No completed deals yet", value="", inline=False)
         return embed
     lines = []
     for rank, row in enumerate(rows, start=1):
-        member = guild.get_member(row["user_id"])
-        name = member.display_name if member else f"User {str(row['user_id'])[-4:]}"
+        user_id = row["user_id"]
+        user_link = f"[{user_id}](https://discord.com/users/{user_id})"
         if role_type == "buyer":
             value = f"{money(row['amount_cents'])} spent | {row['deal_count']} deals"
         elif staff_view:
             value = f"{money(row['amount_cents'])} earned | {row['deal_count']} deals"
         else:
             value = f"{row['deal_count']} completed deals"
-        lines.append(f"**{rank}. {discord.utils.escape_markdown(name)}** - {value}")
+        lines.append(f"**{rank}. {user_link}** - {value}")
     embed.description += "\n\n" + "\n".join(lines)
     if role_type == "creator" and not staff_view:
         embed.set_footer(text="Creator earnings are visible only to staff.")

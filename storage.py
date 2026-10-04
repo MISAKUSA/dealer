@@ -131,6 +131,7 @@ class Store:
     def leaderboard(
         self, period: str, month: str, role_type: str, deal_type: str | None,
         rank_by_amount: bool = True,
+        limit: int | None = 10,
     ) -> list[sqlite3.Row]:
         filters = ["period = ?", "role_type = ?"]
         parameters: list[object] = [period, role_type]
@@ -145,12 +146,14 @@ class Store:
             if rank_by_amount or role_type == "buyer"
             else "deal_count DESC, user_id ASC"
         )
+        limit_clause = " LIMIT ?" if limit is not None else ""
+        if limit is not None:
+            parameters.append(limit)
         with self.connect() as connection:
             return list(connection.execute(
                 f"""SELECT user_id, SUM(deal_count) AS deal_count,
                            SUM(amount_cents) AS amount_cents
                     FROM leaderboards WHERE {' AND '.join(filters)}
-                    GROUP BY user_id ORDER BY {order_by}
-                    LIMIT 10""",
+                    GROUP BY user_id ORDER BY {order_by}{limit_clause}""",
                 parameters,
             ).fetchall())
